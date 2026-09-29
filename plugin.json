@@ -1,0 +1,24 @@
+{
+  "id": "processing",
+  "name": "课次处理",
+  "version": "0.1.0",
+  "api_version": 1,
+  "app_requires": ">=0.1,<0.3",
+  "description": "FuckClassroom 课次文字处理编排与结果页面插件。",
+  "requires": [
+    "classroom"
+  ],
+  "python_requires": [
+    {
+      "requirement": "Pillow>=10.0",
+      "import": "PIL",
+      "label": "Pillow",
+      "optional": false
+    }
+  ],
+  "execution": "in_process",
+  "entry": "plugin.py",
+  "route_prefix": null,
+  "rpc_api_version": null,
+  "rpc_permissions": []
+}
