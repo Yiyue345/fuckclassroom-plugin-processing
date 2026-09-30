@@ -12,9 +12,8 @@ import zipfile
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable, Protocol
 
-from fuckclassroom.classroom.client import ClassroomClient, ClassroomClientError, CourseDetail, Lesson, LessonResource
 from fuckclassroom.core.config import AppConfig
 from fuckclassroom.core.plugins import PluginServiceError
 
@@ -25,6 +24,40 @@ class ExtractionError(RuntimeError):
 
 ProgressCallback = Callable[[int, str], None]
 CancelCheck = Callable[[], None]
+
+
+class CourseLike(Protocol):
+    title: str
+
+
+class LessonResourceLike(Protocol):
+    kind: str
+    is_downloadable: bool
+    url: str | None
+
+
+class LessonLike(Protocol):
+    id: str
+    title: str
+    duration_seconds: int
+    resources: list[LessonResourceLike]
+
+
+class CourseDetailLike(Protocol):
+    course: CourseLike
+    lessons: list[LessonLike]
+
+
+class ClassroomService(Protocol):
+    def get_course_detail(self, course_id: str) -> CourseDetailLike: ...
+
+    def get_lesson_export_target(
+        self, course_id: str, lesson_id: str, kind: str
+    ) -> Any: ...
+
+    def download_lesson_export(
+        self, course_id: str, lesson_id: str, kind: str
+    ) -> Any: ...
 
 
 @dataclass(frozen=True)
@@ -56,11 +89,11 @@ class LessonExtractionService:
         self,
         config: AppConfig | None = None,
         *,
-        classroom: ClassroomClient | None = None,
+        classroom: ClassroomService | None = None,
         service_lookup: Callable[[str, object | None], object | None] | None = None,
     ) -> None:
         self.config = config or AppConfig()
-        self.classroom = classroom or ClassroomClient(self.config)
+        self.classroom = classroom
         self._service_lookup = service_lookup
         # Optional feature services are injected by Plugin Runtime. Keeping these
         # attributes allows focused unit tests to inject lightweight fakes without
@@ -73,6 +106,11 @@ class LessonExtractionService:
         if self._service_lookup is None:
             return legacy
         return self._service_lookup(key, None)
+
+    def _classroom_service(self) -> ClassroomService:
+        if self.classroom is None:
+            raise PluginServiceError("课堂插件未启用")
+        return self.classroom
 
     def _transcription_service(self):
         return self._optional_service("transcription_service", self.transcription)
@@ -96,7 +134,7 @@ class LessonExtractionService:
         progress: ProgressCallback | None = None,
     ) -> ExtractionResult:
         _report(progress, 5, "正在读取课次信息")
-        detail = self.classroom.get_course_detail(course_id)
+        detail = self._classroom_service().get_course_detail(course_id)
         lesson = _find_lesson(detail, lesson_id)
         work_dir = self._lesson_dir(self.config.downloads_dir, detail, lesson)
         output_dir = self._lesson_dir(self.config.outputs_dir, detail, lesson)
@@ -160,7 +198,7 @@ class LessonExtractionService:
                     warnings.append(warning)
                     _task_log(progress, warning, "warning")
             except (
-                ClassroomClientError,
+                PluginServiceError,
                 OSError,
                 zipfile.BadZipFile,
                 ET.ParseError,
@@ -209,12 +247,11 @@ class LessonExtractionService:
                         stats_lock=ocr_stats_lock,
                     )
 
-                if run_ocr and can_ocr_check is None:
-                    ppt_warnings.append("OCR 插件未启用，已跳过课件图片识别。")
-                can_ocr = bool(
-                    run_ocr
-                    and can_ocr_check is not None
-                    and can_ocr_check(ppt_warnings)
+                can_ocr = _resolve_ocr_availability(
+                    run_ocr,
+                    can_ocr_check,
+                    ppt_warnings,
+                    progress,
                 )
                 selected_ocr_callback = ocr_callback if can_ocr else None
 
@@ -263,7 +300,7 @@ class LessonExtractionService:
                 for warning in ocr_warnings:
                     _task_log(progress, warning, "warning")
             except (
-                ClassroomClientError,
+                PluginServiceError,
                 OSError,
                 zipfile.BadZipFile,
                 ET.ParseError,
@@ -360,14 +397,14 @@ class LessonExtractionService:
         force: bool = False,
     ) -> Path:
         _report(progress, 5, "正在读取课次信息")
-        detail = self.classroom.get_course_detail(course_id)
+        detail = self._classroom_service().get_course_detail(course_id)
         lesson = _find_lesson(detail, lesson_id)
         return self._transcribe_lesson(detail, lesson, progress=progress, force=force)
 
     def _transcribe_lesson(
         self,
-        detail: CourseDetail,
-        lesson: Lesson,
+        detail: CourseDetailLike,
+        lesson: LessonLike,
         progress: ProgressCallback | None = None,
         *,
         force: bool = False,
@@ -402,7 +439,7 @@ class LessonExtractionService:
         progress: ProgressCallback | None = None,
     ) -> Path:
         _report(progress, 10, "正在读取课次信息")
-        detail = self.classroom.get_course_detail(course_id)
+        detail = self._classroom_service().get_course_detail(course_id)
         lesson = _find_lesson(detail, lesson_id)
         output_dir = self._lesson_dir(self.config.outputs_dir, detail, lesson)
         combined_path = output_dir / "combined.md"
@@ -422,7 +459,7 @@ class LessonExtractionService:
         return summary_path
 
     def get_existing_outputs(self, course_id: str, lesson_id: str) -> dict[str, str]:
-        detail = self.classroom.get_course_detail(course_id)
+        detail = self._classroom_service().get_course_detail(course_id)
         lesson = _find_lesson(detail, lesson_id)
         output_dir = self._lesson_dir(self.config.outputs_dir, detail, lesson)
         result: dict[str, str] = {}
@@ -433,10 +470,10 @@ class LessonExtractionService:
         return result
 
     def _download_export(self, course_id: str, lesson_id: str, kind: str, work_dir: Path) -> tuple[Path, bool]:
-        target = self.classroom.get_lesson_export_target(course_id, lesson_id, kind)
+        target = self._classroom_service().get_lesson_export_target(course_id, lesson_id, kind)
         if target.exists:
             return target.path, True
-        exported = self.classroom.download_lesson_export(course_id, lesson_id, kind)
+        exported = self._classroom_service().download_lesson_export(course_id, lesson_id, kind)
         return exported.saved_path, exported.from_cache
 
     def _ocr_image(
@@ -463,8 +500,28 @@ class LessonExtractionService:
         return self._legacy_ocr.can_ocr(warnings)
 
     @staticmethod
-    def _lesson_dir(root: Path, detail: CourseDetail, lesson: Lesson) -> Path:
+    def _lesson_dir(root: Path, detail: CourseDetailLike, lesson: LessonLike) -> Path:
         return root / _safe_path(detail.course.title) / _safe_path(lesson.title)
+
+
+def _resolve_ocr_availability(
+    run_ocr: bool,
+    can_ocr_check: Callable[[list[str]], bool] | None,
+    warnings: list[str],
+    progress: ProgressCallback | None = None,
+) -> bool:
+    if not run_ocr:
+        return False
+    if can_ocr_check is None:
+        warnings.append("OCR 插件未启用，已跳过课件图片识别。")
+        return False
+    try:
+        return bool(can_ocr_check(warnings))
+    except PluginServiceError as exc:
+        warning = f"OCR 插件不可用，已跳过：{exc}"
+        warnings.append(warning)
+        _task_log(progress, warning, "warning")
+        return False
 
 
 def extract_docx_text(path: Path) -> str:
@@ -487,7 +544,7 @@ def _platform_transcript_is_usable(
     text: str,
     *,
     course_title: str,
-    lesson: Lesson,
+    lesson: LessonLike,
 ) -> tuple[bool, str]:
     candidate = text.strip()
     if not candidate:
@@ -841,14 +898,14 @@ def _xml_texts(root: ET.Element) -> list[str]:
     return texts
 
 
-def _find_lesson(detail: CourseDetail, lesson_id: str) -> Lesson:
+def _find_lesson(detail: CourseDetailLike, lesson_id: str) -> LessonLike:
     lesson = next((item for item in detail.lessons if item.id == lesson_id), None)
     if lesson is None:
         raise ExtractionError("未找到指定课次")
     return lesson
 
 
-def _find_resource(lesson: Lesson, kind: str) -> LessonResource | None:
+def _find_resource(lesson: LessonLike, kind: str) -> LessonResourceLike | None:
     return next(
         (
             resource
