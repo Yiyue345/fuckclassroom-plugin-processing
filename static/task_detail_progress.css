@@ -1,0 +1,53 @@
+.inline-task-detail {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.inline-task-detail-message {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+
+.inline-task-detail-message::before {
+  content: "模型";
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 18px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  color: var(--text);
+  font-size: var(--font-xs);
+  font-weight: 700;
+}
+
+.inline-task-detail .progress {
+  height: 5px;
+  margin-top: 6px;
+}
+
+
+.transcription-complete {
+  border-color: color-mix(in srgb, var(--green) 38%, var(--border));
+  background: var(--green-soft);
+  color: var(--green);
+  font-weight: 650;
+}
+
+.transcription-complete:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+form[data-transcription-form][aria-busy="true"] [data-transcription-submit] {
+  cursor: wait;
+  opacity: .62;
+}

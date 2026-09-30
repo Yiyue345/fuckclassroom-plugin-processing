@@ -1,0 +1,4 @@
+{% import "ui/components.html" as ui %}
+{% call ui.section("processing", "课次处理", "控制文字提取任务完成后的行为。") %}
+    {{ ui.checkbox("auto_open_outputs_after_extract", "提取完成后自动打开结果页", settings.auto_open_outputs_after_extract) }}
+{% endcall %}

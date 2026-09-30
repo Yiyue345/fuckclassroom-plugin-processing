@@ -1,0 +1,11 @@
+/* Processing plugin UI */
+
+.output-actions { display: flex; gap: 8px; margin-bottom: 18px; }
+.output-section { margin-bottom: 14px; }
+.output-section:last-child { margin-bottom: 0; }
+.output-section header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 14px 18px; }
+.output-section h2 { margin: 0; }
+.output-content { max-height: 620px; overflow: auto; padding: 18px; }
+.output-content pre { margin: 0; color: var(--text-soft); font-family: "Segoe UI", "Microsoft YaHei", sans-serif; font-size: var(--font-sm); line-height: 1.8; white-space: pre-wrap; word-break: break-word; }
+
+@media (max-width: 760px) { .output-actions { flex-wrap: wrap; } .output-section { min-width: 0; } }

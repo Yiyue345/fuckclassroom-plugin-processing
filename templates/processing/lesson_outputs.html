@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% set ui_page = "lesson_outputs" %}
+{% set active_system = "classroom" %}
+{% set active_nav = "tasks" %}
+
+{% block title %}文字提取与总结 · 学业助手{% endblock %}
+{% block breadcrumb_parent %}<a href="/courses/{{ course_id }}">课程资源</a>{% endblock %}
+{% block page_title %}文字提取与总结{% endblock %}
+
+{% block content %}
+  {% set plugin_registry = request.app.state.plugin_registry %}
+  <div class="page-head">
+    <div><h1>文字提取与总结</h1><p class="page-description">课件 OCR、语音转写、合并文本和 AI 总结；本地转写同时导出到文件管理。</p></div>
+    <div class="head-actions"><a class="btn" href="/courses/{{ course_id }}"><svg class="icon"><use href="/static/icons.svg#arrow-left"></use></svg>返回课程</a></div>
+  </div>
+
+  {% if error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ error }}</span></div>{% endif %}
+
+  <div class="notice inline-task-status hidden" id="lesson-task-status" role="status" aria-live="polite">
+    <svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>
+    <div class="inline-task-body">
+      <div class="inline-task-message" data-task-message>正在准备处理</div>
+      <div class="progress" aria-hidden="true"><span data-task-progress></span></div>
+    </div>
+  </div>
+
+  <div class="output-actions">
+    {% set output_url = "/courses/" ~ course_id ~ "/lessons/" ~ lesson_id ~ "/outputs" %}
+    <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/extract" data-inline-task data-task-status="#lesson-task-status" data-task-group="lesson-processing" data-task-starting="正在启动文字提取" data-task-fallback="文字提取失败" data-task-success="文字提取已完成" data-transcription-attempt data-transcription-output-url="{{ output_url }}"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#scan-text"></use></svg>重新提取</button></form>
+    {% for contribution in plugin_registry.slot_templates("processing.output.actions") %}{% include contribution %}{% endfor %}
+    <a class="btn" href="/downloads"><svg class="icon"><use href="/static/icons.svg#folder"></use></svg>查看本地转写文件</a>
+  </div>
+
+  {% if not outputs %}
+    <section class="surface empty-state"><div><svg class="icon"><use href="/static/icons.svg#file-text"></use></svg><p>还没有提取结果</p></div></section>
+  {% endif %}
+
+  {% if outputs.get("summary.md") %}
+    <section class="surface output-section"><header><h2>AI 总结</h2><span class="status blue"><svg class="icon small"><use href="/static/icons.svg#sparkles"></use></svg>Summary</span></header><div class="output-content"><pre>{{ outputs.get("summary.md") }}</pre></div></section>
+  {% endif %}
+  {% if outputs.get("combined.md") %}
+    <section class="surface output-section"><header><h2>合并文本</h2><span class="status gray">Combined</span></header><div class="output-content"><pre>{{ outputs.get("combined.md") }}</pre></div></section>
+  {% endif %}
+  {% if outputs.get("ppt_ocr.md") %}
+    <section class="surface output-section"><header><h2>课件 OCR</h2><span class="status green"><svg class="icon small"><use href="/static/icons.svg#scan-text"></use></svg>OCR</span></header><div class="output-content"><pre>{{ outputs.get("ppt_ocr.md") }}</pre></div></section>
+  {% endif %}
+  {% if outputs.get("transcript.md") %}
+    {% set transcript_text = outputs.get("transcript.md") %}
+    {% set transcript_complete = "暂无可用的可信转写" not in transcript_text %}
+    <section class="surface output-section" data-output-transcript{% if transcript_complete %} data-output-transcript-complete{% endif %}><header><h2>语音转写</h2><span class="status gray"><svg class="icon small"><use href="/static/icons.svg#captions"></use></svg>Transcript</span></header><div class="output-content"><pre>{{ transcript_text }}</pre></div></section>
+  {% endif %}
+{% endblock %}

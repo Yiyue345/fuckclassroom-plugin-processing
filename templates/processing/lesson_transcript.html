@@ -1,0 +1,7 @@
+{% if media.video_url %}
+                {% set output_url = "/courses/" ~ detail.course.id ~ "/lessons/" ~ lesson.id ~ "/outputs" %}
+                <form method="post" action="/courses/{{ detail.course.id }}/lessons/{{ lesson.id }}/extract" data-inline-task data-task-status="#course-task-status" data-task-group="course-extraction" data-task-starting="正在启动文字提取" data-task-fallback="文字提取失败" data-task-success="文字提取已完成" data-transcription-form data-transcription-output-url="{{ output_url }}">
+                  <button class="resource-chip ready media-trigger" type="submit" data-task-submit data-transcription-submit><svg class="icon small"><use href="/static/icons.svg#captions"></use></svg>{{ "本地转写" if plugin_registry.is_enabled("transcription") else "提取文字" }}</button>
+                </form>
+                <a class="resource-chip ready media-trigger transcription-complete hidden" href="{{ output_url }}" data-transcription-complete data-transcription-output-url="{{ output_url }}" title="查看已完成的转写"><svg class="icon small"><use href="/static/icons.svg#circle-check"></use></svg>已转写</a>
+{% else %}<span class="muted">暂无转写</span>{% endif %}
