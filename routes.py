@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, Response
 
-from fuckclassroom.classroom import ClassroomClientError
+from fuckclassroom.core.plugins import PluginServiceError
 from .extraction import ExtractionError
 from fuckclassroom.web.responses import task_started_response
 
@@ -49,7 +49,7 @@ def build_router(context) -> APIRouter:
         outputs = {}
         try:
             outputs = extraction_service.get_existing_outputs(course_id, lesson_id)
-        except (ClassroomClientError, ExtractionError) as exc:
+        except (PluginServiceError, ExtractionError) as exc:
             error = str(exc)
         return templates.TemplateResponse(
             request,
