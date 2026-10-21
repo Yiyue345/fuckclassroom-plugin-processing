@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import html
 import io
 import json
 import math
@@ -61,7 +62,11 @@ def load_actual_functions():
     ], type_ignores=[]))
     env = {
         "hashlib": hashlib,
+        "html": html,
         "io": io,
+        "_task_log": lambda progress, message, level="info": (
+            progress.log(message, level) if progress else None
+        ),
         "json": json,
         "math": math,
         "posixpath": posixpath,
