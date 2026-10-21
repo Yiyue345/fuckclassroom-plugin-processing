@@ -36,6 +36,28 @@ def build_router(context) -> APIRouter:
         )
         return task_started_response(request, task, result_url)
 
+    @router.post("/courses/{course_id}/lessons/{lesson_id}/retranscribe")
+    def retranscribe_lesson(request: Request, course_id: str, lesson_id: str) -> Response:
+        result_url = f"/courses/{course_id}/lessons/{lesson_id}/outputs"
+
+        def worker(progress):
+            extraction_service.regenerate_transcript(course_id, lesson_id, progress)
+            return result_url
+
+        task = task_manager.start("重新语音转写", worker, auto_open_result=False)
+        return task_started_response(request, task, result_url)
+
+    @router.post("/courses/{course_id}/lessons/{lesson_id}/reocr")
+    def reocr_lesson(request: Request, course_id: str, lesson_id: str) -> Response:
+        result_url = f"/courses/{course_id}/lessons/{lesson_id}/outputs"
+
+        def worker(progress):
+            extraction_service.regenerate_ppt_ocr(course_id, lesson_id, progress)
+            return result_url
+
+        task = task_manager.start("重新 PPT OCR", worker, auto_open_result=False)
+        return task_started_response(request, task, result_url)
+
     @router.get(
         "/courses/{course_id}/lessons/{lesson_id}/outputs",
         response_class=HTMLResponse,
