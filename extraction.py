@@ -428,9 +428,7 @@ class LessonExtractionService:
             duration_hint_seconds=lesson.duration_seconds,
         )
         transcript_path = output_dir / "transcript.md"
-        transcript_path.write_text(
-            _section("本地语音转写", result.text), encoding="utf-8"
-        )
+        _atomic_text(transcript_path, _section("本地语音转写", result.text))
         return transcript_path
 
     def regenerate_transcript(
@@ -446,10 +444,13 @@ class LessonExtractionService:
         if self._transcription_service() is None:
             raise PluginServiceError("请先启用语音转写插件并在设置中选择模型")
 
-        # The Whisper service writes its text file atomically, and only
-        # updates transcript.md on success. Do not clear existing output first.
+        # Scale Whisper's 0-100 progress into this composite job's 5-90
+        # range so rebuilding combined output never moves the bar backwards.
+        def asr_progress(value: int, message: str) -> None:
+            _report(progress, 5 + int(value * 0.85), message)
+
         transcript_path = self._transcribe_lesson(
-            detail, lesson, progress=progress, force=True,
+            detail, lesson, progress=asr_progress, force=True,
         )
         output_dir = self._lesson_dir(self.config.outputs_dir, detail, lesson)
         self._rebuild_combined_after_regeneration(output_dir, detail, lesson, progress)
