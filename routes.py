@@ -69,8 +69,10 @@ def build_router(context) -> APIRouter:
     ) -> HTMLResponse:
         error = None
         outputs = {}
+        ocr_status = {}
         try:
             outputs = extraction_service.get_existing_outputs(course_id, lesson_id)
+            ocr_status = extraction_service.get_ocr_status(course_id, lesson_id)
         except (PluginServiceError, ExtractionError) as exc:
             error = str(exc)
         return templates.TemplateResponse(
@@ -81,6 +83,7 @@ def build_router(context) -> APIRouter:
                 "course_id": course_id,
                 "lesson_id": lesson_id,
                 "outputs": outputs,
+                "ocr_status": ocr_status,
                 "error": error,
             },
         )
