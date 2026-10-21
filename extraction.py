@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import html
 import io
+import json
 import math
 import posixpath
 import re
@@ -12,6 +13,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -220,6 +222,9 @@ class LessonExtractionService:
         ppt_text_path = output_dir / "ppt_ocr.md"
         ppt_text = ""
         ppt_warnings: list[str] = []
+        ocr_details: dict[str, int] = {}
+        ocr_state = "skipped"
+        ocr_message = ""
         ppt_resource = _find_resource(lesson, "ppt")
 
         if ppt_resource is not None:
@@ -287,7 +292,29 @@ class LessonExtractionService:
                     ocr_workers=self.config.ocr_workers,
                     cancel_check=cancel_check if callable(cancel_check) else None,
                     event_log=lambda message, level="info": _task_log(progress, message, level),
+                    diagnostics=ocr_details,
                 )
+                referenced = ocr_details.get("referenced", 0)
+                attempted = ocr_details.get("attempted", 0)
+                extracted = ocr_details.get("recognized", 0)
+                failed = ocr_details.get("failed", 0)
+                if not referenced:
+                    ocr_state = "no_images"
+                    ocr_message = "课件未发现可识别的图片；已提取可用的 PPT 原生文本。"
+                elif not can_ocr:
+                    ocr_state = "skipped"
+                    reason = ppt_warnings[0] if ppt_warnings else "OCR 尚未就绪"
+                    ocr_message = f"检测到 {referenced} 张课件图片，但未执行 OCR。{reason}"
+                elif failed:
+                    ocr_state = "partial"
+                    ocr_message = f"OCR 部分成功：已尝试 {attempted} 张，提取文本 {extracted} 张，失败 {failed} 张。"
+                elif not extracted:
+                    ocr_state = "empty"
+                    ocr_message = f"已尝试 OCR {attempted} 张，但未识别到有效文字；可更换 OCR 引擎后重新识别。"
+                else:
+                    ocr_state = "completed"
+                    ocr_message = f"OCR 已完成：已尝试 {attempted} 张，其中 {extracted} 张识别到文字。"
+
                 if can_ocr:
                     with ocr_stats_lock:
                         cache_hits = ocr_stats["cache_hits"]
@@ -302,18 +329,26 @@ class LessonExtractionService:
                     _task_log(progress, warning, "warning")
             except (
                 PluginServiceError,
+                ExtractionError,
                 OSError,
                 zipfile.BadZipFile,
                 ET.ParseError,
             ) as exc:
-                warning = f"课件提取失败：{exc}"
-                ppt_warnings.append(warning)
-                _task_log(progress, warning, "warning")
+                ocr_state = "failed"
+                ocr_message = f"课件处理失败：{exc}。请查看任务日志，检查课件格式和 OCR 依赖后重试。"
+                ppt_warnings.append(ocr_message)
+                _task_log(progress, ocr_message, "error")
         else:
-            warning = "本课次没有可用 PPT，已跳过课件文字提取。"
-            ppt_warnings.append(warning)
-            _task_log(progress, warning, "warning")
+            ocr_state = "no_ppt"
+            ocr_message = "本课次没有可用 PPT，无需执行 OCR。"
+            ppt_warnings.append(ocr_message)
+            _task_log(progress, ocr_message, "info")
 
+        if ocr_state in {"skipped", "partial", "empty", "no_images"} and ocr_message:
+            if ocr_state in {"empty", "no_images"}:
+                ppt_warnings.append(ocr_message)
+            _task_log(progress, f"OCR 任务结论：{ocr_message}", "warning" if ocr_state in {"skipped", "partial"} else "info")
+        _write_ocr_status(output_dir, ocr_state, ocr_message, ocr_details)
         warnings.extend(ppt_warnings)
         warning_text = "\n".join(f"- {item}" for item in ppt_warnings)
         ppt_body = ppt_text
@@ -568,6 +603,33 @@ class LessonExtractionService:
         _report(progress, 100, "AI 总结完成")
         return summary_path
 
+    def get_ocr_status(self, course_id: str, lesson_id: str) -> dict[str, Any]:
+        """Read a persisted OCR outcome; provide a safe fallback for older results."""
+        detail = self._classroom_service().get_course_detail(course_id)
+        lesson = _find_lesson(detail, lesson_id)
+        output_dir = self._lesson_dir(self.config.outputs_dir, detail, lesson)
+        path = output_dir / "ocr_status.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict) and payload.get("state") in {
+                "completed", "partial", "empty", "skipped", "failed", "no_images", "no_ppt"
+            }:
+                return payload
+        except (OSError, ValueError, TypeError):
+            pass
+        # Old results predate ocr_status.json; never label an explicit skip
+        # warning as successful merely because ppt_ocr.md exists.
+        prior = output_dir / "ppt_ocr.md"
+        try:
+            content = prior.read_text(encoding="utf-8")
+        except OSError:
+            return {}
+        if "未执行 OCR" in content or "已跳过 OCR" in content:
+            return {"state": "skipped", "message": "历史课件结果提示 OCR 未执行。请检查插件状态和任务日志。"}
+        if "OCR 失败" in content or "课件提取失败" in content:
+            return {"state": "partial", "message": "历史课件结果中包含 OCR 失败提示；请查看任务日志。"}
+        return {"state": "unknown", "message": "旧结果没有单独记录 OCR 执行状态，无法确认图片是否实际识别。"}
+
     def get_existing_outputs(self, course_id: str, lesson_id: str) -> dict[str, str]:
         detail = self._classroom_service().get_course_detail(course_id)
         lesson = _find_lesson(detail, lesson_id)
@@ -621,17 +683,30 @@ def _resolve_ocr_availability(
     progress: ProgressCallback | None = None,
 ) -> bool:
     if not run_ocr:
-        return False
-    if can_ocr_check is None:
-        warnings.append("OCR 插件未启用，已跳过课件图片识别。")
-        return False
-    try:
-        return bool(can_ocr_check(warnings))
-    except PluginServiceError as exc:
-        warning = f"OCR 插件不可用，已跳过：{exc}"
+        warning = "PPT OCR 插件未启用，未执行图片 OCR。请到「插件管理」启用 PPT OCR，然后点击「重新 OCR」。"
         warnings.append(warning)
         _task_log(progress, warning, "warning")
         return False
+    if can_ocr_check is None:
+        warning = "PPT OCR 已启用，但识别服务未注册或未就绪；可重新启用插件或重启程序后重试。"
+        warnings.append(warning)
+        _task_log(progress, warning, "warning")
+        return False
+    try:
+        available = bool(can_ocr_check(warnings))
+    except Exception as exc:
+        warning = f"OCR 引擎初始化或可用性检查异常（{type(exc).__name__}）：{exc}"
+        warnings.append(warning)
+        _task_log(progress, warning, "error")
+        return False
+    if not available:
+        if not warnings:
+            warnings.append("OCR 引擎不可用，请检查「设置 → PPT OCR」中的引擎和运行依赖。")
+        for warning in warnings:
+            _task_log(progress, f"OCR 前置检查未通过：{warning}", "warning")
+        return False
+    _task_log(progress, "OCR 前置检查通过，已准备调用图片识别引擎。", "info")
+    return True
 
 
 def extract_docx_text(path: Path) -> str:
@@ -695,6 +770,7 @@ def extract_pptx_text(
     ocr_workers: int = 1,
     cancel_check: CancelCheck | None = None,
     event_log: Callable[[str, str], None] | None = None,
+    diagnostics: dict[str, int] | None = None,
 ) -> tuple[str, list[str]]:
     lines: list[str] = []
     warnings: list[str] = []
@@ -723,8 +799,14 @@ def extract_pptx_text(
             if name.startswith("ppt/media/") and _is_image_name(name)
         )
         image_names = _referenced_ppt_images(archive, slide_names, all_media_names)
+        if diagnostics is not None:
+            diagnostics.update(referenced=len(image_names), attempted=0, recognized=0, failed=0, empty=0)
+        if event_log is not None:
+            event_log(f"PPT 检测：{len(slide_names)} 页，引用图片 {len(image_names)} 张，原生文本块 {sum(bool(line.strip()) for line in lines)} 个。", "info")
         if image_names and ocr_image is None:
-            warnings.append(f"课件中检测到 {len(image_names)} 张被幻灯片引用的图片，未执行 OCR。")
+            warnings.append(f"检测到 {len(image_names)} 张被幻灯片引用的图片；OCR 未启动，图片文字未提取。请查看上方跳过原因。")
+            if event_log is not None:
+                event_log(f"OCR 未启动：{len(image_names)} 张图片均未进行识别，PPT 原生文本仍会保留。", "warning")
             return "\n\n".join(lines).strip(), warnings
 
         if ocr_image is not None and image_names:
@@ -736,6 +818,8 @@ def extract_pptx_text(
                 event_log=event_log,
                 total_media_count=len(all_media_names),
             )
+            if diagnostics is not None:
+                diagnostics["attempted"] = len(image_jobs)
 
     if ocr_image is not None and image_jobs:
         results, ocr_warnings = _run_ocr_jobs(
@@ -746,12 +830,24 @@ def extract_pptx_text(
             cancel_check=cancel_check,
         )
         warnings.extend(ocr_warnings)
+        if diagnostics is not None:
+            diagnostics["recognized"] = sum(bool(text) for _, _, text in results)
+            diagnostics["failed"] = len(ocr_warnings)
+            diagnostics["empty"] = sum(not bool(text) for _, _, text in results)
+        if event_log is not None:
+            event_log(
+                f"PPT OCR 执行统计：已尝试 {len(image_jobs)} 张，识别到文字 {sum(bool(text) for _, _, text in results)} 张，"
+                f"返回空文本 {sum(not bool(text) for _, _, text in results)} 张，出错 {len(ocr_warnings)} 张。",
+                "warning" if ocr_warnings else "info",
+            )
         for index, image_name, text in sorted(results, key=lambda item: item[0]):
             if text:
                 lines.append(f"## 图片 {index}: {Path(image_name).name}\n{text}")
 
     if not lines and not warnings:
         warnings.append("课件中没有检测到可提取的文本或图片")
+    if not image_jobs and not image_names and event_log is not None:
+        event_log("PPT 中未发现可执行 OCR 的引用图片；如有文字，已通过原生 XML 提取。", "info")
     return "\n\n".join(lines).strip(), warnings
 
 
@@ -1033,6 +1129,25 @@ def _safe_path(value: str) -> str:
 
 def _is_image_name(name: str) -> bool:
     return Path(name).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+
+
+def _write_ocr_status(
+    output_dir: Path,
+    state: str,
+    message: str,
+    diagnostics: dict[str, int],
+) -> None:
+    record = {
+        "state": state,
+        "message": message,
+        "referenced": diagnostics.get("referenced", 0),
+        "attempted": diagnostics.get("attempted", 0),
+        "recognized": diagnostics.get("recognized", 0),
+        "failed": diagnostics.get("failed", 0),
+        "empty": diagnostics.get("empty", 0),
+        "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    _atomic_text(output_dir / "ocr_status.json", json.dumps(record, ensure_ascii=False, indent=2))
 
 
 def _atomic_text(path: Path, text: str) -> None:
