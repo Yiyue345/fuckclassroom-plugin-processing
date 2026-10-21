@@ -522,6 +522,7 @@ class LessonExtractionService:
         ppt_path, _ = self._download_export(course_id, lesson_id, "ppt", work_dir)
         statistics = {"cache_hits": 0, "inferences": 0}
         statistics_lock = threading.Lock()
+        ocr_details: dict[str, int] = {}
 
         def recognize(data: bytes, name: str) -> str:
             return ocr_service.ocr_image(
@@ -541,6 +542,7 @@ class LessonExtractionService:
             ocr_workers=self.config.ocr_workers,
             cancel_check=cancel if callable(cancel) else None,
             event_log=lambda message, level="info": _task_log(progress, message, level),
+            diagnostics=ocr_details,
         )
         if any("OCR 失败" in message for message in failures):
             # Do not silently replace the last good OCR document with a
@@ -557,6 +559,18 @@ class LessonExtractionService:
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / "ppt_ocr.md"
         _atomic_text(output_path, _section("课件 OCR", body))
+        attempted = ocr_details.get("attempted", 0)
+        recognized = ocr_details.get("recognized", 0)
+        state = "completed" if recognized else "empty" if attempted else "no_images"
+        message = (
+            f"重新 OCR 已完成：处理 {attempted} 张，识别到文字 {recognized} 张。"
+            if state == "completed" else
+            f"重新 OCR 已处理 {attempted} 张，未识别到文字；请检查引擎选择。"
+            if state == "empty" else
+            "课件中没有图片可供 OCR；已保留原生 PPT 文本。"
+        )
+        _write_ocr_status(output_dir, state, message, ocr_details)
+        _task_log(progress, f"OCR 任务结论：{message}", "info")
         self._rebuild_combined_after_regeneration(output_dir, detail, lesson, progress)
         _report(progress, 100, "PPT 重新 OCR 完成，合并文本已更新")
         return output_path
