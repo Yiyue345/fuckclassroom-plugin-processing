@@ -127,7 +127,12 @@ class LessonExtractionService:
         service = self._optional_service("ocr_service")
         if service is None:
             return None, None
-        return service.ocr_image, service.can_ocr
+        recognize = getattr(service, "ocr_image", None)
+        check = getattr(service, "can_ocr", None)
+        # A half-initialized provider is unavailable, not an empty OCR result.
+        if not callable(recognize) or not callable(check):
+            return None, None
+        return recognize, check
 
     def extract_lesson(
         self,
