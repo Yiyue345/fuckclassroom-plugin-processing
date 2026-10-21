@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import ast
+import json
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -29,7 +31,7 @@ def _load_processing(overrides=None):
         node for node in parsed.body
         if isinstance(node, (ast.ClassDef, ast.FunctionDef))
         and node.name in {
-            "LessonExtractionService", "_atomic_text", "_section",
+            "LessonExtractionService", "_atomic_text", "_write_ocr_status", "_section",
             "_safe_path", "_find_lesson", "_find_resource",
         }
     ]
@@ -39,6 +41,9 @@ def _load_processing(overrides=None):
     ], type_ignores=[]))
     env = {
         "Path": Path,
+        "json": json,
+        "datetime": datetime,
+        "timezone": timezone,
         "tempfile": tempfile,
         "threading": threading,
         "PluginServiceError": PluginServiceError,
@@ -130,6 +135,7 @@ class RegenerateOutputTests(unittest.TestCase):
         seen = []
         def run_ppt(path, callback, max_images, *, progress, **kwargs):
             text = callback(b"test-image", "slide.png")
+            kwargs["diagnostics"].update(referenced=1, attempted=1, recognized=1, failed=0, empty=0)
             progress(1, 1, "slide.png")
             return "图片：" + text, []
 
@@ -154,6 +160,9 @@ class RegenerateOutputTests(unittest.TestCase):
             self.assertIn("旧语音", (target / "transcript.md").read_text())
             self.assertIn("新引擎文字", (target / "combined.md").read_text())
             self.assertFalse((target / "summary.md").exists())
+            status = json.loads((target / "ocr_status.json").read_text(encoding="utf-8"))
+            self.assertEqual(status["state"], "completed")
+            self.assertEqual(status["attempted"], 1)
 
     def test_ppt_ocr_failure_keeps_old_outputs(self):
         def run_ppt(*args, **kwargs):
