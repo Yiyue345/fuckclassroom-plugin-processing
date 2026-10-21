@@ -16,6 +16,20 @@
 
   {% if error %}<div class="notice error"><svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg><span>{{ error }}</span></div>{% endif %}
 
+  {% if not plugin_registry.is_enabled("ocr") %}
+    <div class="notice warning" data-ocr-plugin-disabled role="status">
+      <svg class="icon"><use href="/static/icons.svg#circle-alert"></use></svg>
+      <span><strong>PPT OCR 当前未启用。</strong>提取文字时仍会读取课件原生文字，但会跳过图片识别。请先到 <a href="/plugins">插件管理</a> 启用 PPT OCR，再重新提取。</span>
+    </div>
+  {% endif %}
+  {% set ocr_state = ocr_status.get("state", "unknown") %}
+  {% if ocr_status and ocr_state != "completed" %}
+    <div class="notice {{ 'error' if ocr_state == 'failed' else 'warning' if ocr_state in ['skipped', 'partial', 'empty'] else '' }}" data-ocr-result-status role="status">
+      <svg class="icon"><use href="/static/icons.svg#{{ 'circle-alert' if ocr_state in ['failed', 'skipped', 'partial'] else 'file-text' }}"></use></svg>
+      <span>{{ ocr_status.get("message", "OCR 执行状态暂不可用。") }}{% if ocr_state in ['skipped', 'failed', 'partial', 'empty'] %} 可检查 <a href="/plugins">插件管理</a>和<a href="/settings">OCR 设置</a>，然后重新执行。{% endif %}</span>
+    </div>
+  {% endif %}
+
   <div class="notice inline-task-status hidden" id="lesson-task-status" role="status" aria-live="polite">
     <svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>
     <div class="inline-task-body">
@@ -64,7 +78,7 @@
     <section class="surface output-section"><header><h2>合并文本</h2><span class="status gray">Combined</span></header><div class="output-content"><pre>{{ outputs.get("combined.md") }}</pre></div></section>
   {% endif %}
   {% if outputs.get("ppt_ocr.md") %}
-    <section class="surface output-section"><header><h2>课件 OCR</h2><span class="status green"><svg class="icon small"><use href="/static/icons.svg#scan-text"></use></svg>OCR</span></header><div class="output-content"><pre>{{ outputs.get("ppt_ocr.md") }}</pre></div></section>
+    <section class="surface output-section"><header><h2>课件 OCR</h2><span class="status {{ 'green' if ocr_state == 'completed' else 'amber' if ocr_state in ['skipped', 'partial', 'empty'] else 'red' if ocr_state == 'failed' else 'gray' }}" data-ocr-outcome-badge><svg class="icon small"><use href="/static/icons.svg#scan-text"></use></svg>{{ {'completed': '已识别', 'partial': '部分成功', 'empty': '识别无文字', 'skipped': '未执行', 'failed': '失败', 'no_images': '无图片', 'no_ppt': '无课件', 'unknown': '状态未知'}.get(ocr_state, '状态未知') }}</span></header><div class="output-content"><pre>{{ outputs.get("ppt_ocr.md") }}</pre></div></section>
   {% endif %}
   {% if outputs.get("transcript.md") %}
     {% set transcript_text = outputs.get("transcript.md") %}

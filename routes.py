@@ -21,10 +21,17 @@ def build_router(context) -> APIRouter:
         result_url = f"/courses/{course_id}/lessons/{lesson_id}/outputs"
 
         def worker(progress):
+            ocr_enabled = context.registry.is_enabled("ocr")
+            if not ocr_enabled:
+                warning = "PPT OCR 插件未启用：本次仍会提取原生 PPT 文字，但不会识别图片；请到插件管理启用后重新 OCR。"
+                report = getattr(progress, "log", None)
+                if callable(report):
+                    report(warning, "warning")
+                progress(1, warning)
             extraction_service.extract_lesson(
                 course_id,
                 lesson_id,
-                run_ocr=context.registry.is_enabled("ocr"),
+                run_ocr=ocr_enabled,
                 progress=progress,
             )
             return result_url
@@ -69,8 +76,10 @@ def build_router(context) -> APIRouter:
     ) -> HTMLResponse:
         error = None
         outputs = {}
+        ocr_status = {}
         try:
             outputs = extraction_service.get_existing_outputs(course_id, lesson_id)
+            ocr_status = extraction_service.get_ocr_status(course_id, lesson_id)
         except (PluginServiceError, ExtractionError) as exc:
             error = str(exc)
         return templates.TemplateResponse(
@@ -81,6 +90,7 @@ def build_router(context) -> APIRouter:
                 "course_id": course_id,
                 "lesson_id": lesson_id,
                 "outputs": outputs,
+                "ocr_status": ocr_status,
                 "error": error,
             },
         )
