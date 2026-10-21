@@ -27,9 +27,31 @@
   <div class="output-actions">
     {% set output_url = "/courses/" ~ course_id ~ "/lessons/" ~ lesson_id ~ "/outputs" %}
     <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/extract" data-inline-task data-task-status="#lesson-task-status" data-task-group="lesson-processing" data-task-starting="正在启动文字提取" data-task-fallback="文字提取失败" data-task-success="文字提取已完成" data-transcription-attempt data-transcription-output-url="{{ output_url }}"><button class="btn" type="submit" data-task-submit><svg class="icon"><use href="/static/icons.svg#scan-text"></use></svg>重新提取</button></form>
+    {% if plugin_registry.is_enabled("transcription") %}
+      <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/retranscribe"
+            data-inline-task data-task-status="#lesson-task-status" data-task-group="lesson-processing"
+            data-task-starting="正在使用当前模型重新转写" data-task-fallback="重新转写失败"
+            data-task-success="重新转写完成">
+        <button class="btn" type="submit" data-task-submit title="使用当前设置的语音模型重新处理，成功后替换旧结果">
+          <svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>重新转写
+        </button>
+      </form>
+    {% endif %}
+    {% if plugin_registry.is_enabled("ocr") %}
+      <form method="post" action="/courses/{{ course_id }}/lessons/{{ lesson_id }}/reocr"
+            data-inline-task data-task-status="#lesson-task-status" data-task-group="lesson-processing"
+            data-task-starting="正在使用当前 OCR 引擎重新识别 PPT" data-task-fallback="重新 OCR 失败"
+            data-task-success="PPT 重新 OCR 完成">
+        <button class="btn" type="submit" data-task-submit title="使用当前设置的 OCR 引擎强制重新识别图片，不读取旧 OCR 缓存">
+          <svg class="icon"><use href="/static/icons.svg#refresh-cw"></use></svg>重新 OCR
+        </button>
+      </form>
+    {% endif %}
     {% for contribution in plugin_registry.slot_templates("processing.output.actions") %}{% include contribution %}{% endfor %}
     <a class="btn" href="/downloads"><svg class="icon"><use href="/static/icons.svg#folder"></use></svg>查看本地转写文件</a>
   </div>
+
+  <p class="output-regeneration-hint">使用设置中的当前语音模型或 OCR 引擎重新生成。任务成功后才更新源文本；旧 AI 总结会失效，需要重新生成。</p>
 
   {% if not outputs %}
     <section class="surface empty-state"><div><svg class="icon"><use href="/static/icons.svg#file-text"></use></svg><p>还没有提取结果</p></div></section>

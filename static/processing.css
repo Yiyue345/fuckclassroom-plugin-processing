@@ -1,6 +1,7 @@
 /* Processing plugin UI */
 
-.output-actions { display: flex; gap: 8px; margin-bottom: 18px; }
+.output-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.output-regeneration-hint { color: var(--text-muted); font-size: var(--font-xs); line-height: 1.7; margin: 0 0 18px; }
 .output-section { margin-bottom: 14px; }
 .output-section:last-child { margin-bottom: 0; }
 .output-section header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 14px 18px; }

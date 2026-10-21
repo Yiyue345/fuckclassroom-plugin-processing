@@ -6,6 +6,7 @@ import io
 import math
 import posixpath
 import re
+import tempfile
 import threading
 import xml.etree.ElementTree as ET
 import zipfile
@@ -427,10 +428,119 @@ class LessonExtractionService:
             duration_hint_seconds=lesson.duration_seconds,
         )
         transcript_path = output_dir / "transcript.md"
-        transcript_path.write_text(
-            _section("本地语音转写", result.text), encoding="utf-8"
-        )
+        _atomic_text(transcript_path, _section("本地语音转写", result.text))
         return transcript_path
+
+    def regenerate_transcript(
+        self,
+        course_id: str,
+        lesson_id: str,
+        progress: ProgressCallback | None = None,
+    ) -> Path:
+        """Rerun Whisper with current settings, ignoring the saved transcript."""
+        _report(progress, 5, "准备使用当前语音模型重新转写")
+        detail = self._classroom_service().get_course_detail(course_id)
+        lesson = _find_lesson(detail, lesson_id)
+        if self._transcription_service() is None:
+            raise PluginServiceError("请先启用语音转写插件并在设置中选择模型")
+
+        # Scale Whisper's 0-100 progress into this composite job's 5-90
+        # range so rebuilding combined output never moves the bar backwards.
+        def asr_progress(value: int, message: str) -> None:
+            _report(progress, 5 + int(value * 0.85), message)
+
+        transcript_path = self._transcribe_lesson(
+            detail, lesson, progress=asr_progress, force=True,
+        )
+        output_dir = self._lesson_dir(self.config.outputs_dir, detail, lesson)
+        self._rebuild_combined_after_regeneration(output_dir, detail, lesson, progress)
+        _report(progress, 100, "重新转写完成，合并文本已更新")
+        return transcript_path
+
+    def regenerate_ppt_ocr(
+        self,
+        course_id: str,
+        lesson_id: str,
+        progress: ProgressCallback | None = None,
+    ) -> Path:
+        """Rerun PPT OCR using the current engine, bypassing OCR text caches."""
+        _report(progress, 5, "准备使用当前 OCR 引擎重新识别")
+        detail = self._classroom_service().get_course_detail(course_id)
+        lesson = _find_lesson(detail, lesson_id)
+        ppt_resource = _find_resource(lesson, "ppt")
+        if ppt_resource is None:
+            raise ExtractionError("本课次没有可用的 PPT 课件")
+        ocr_service = self._optional_service("ocr_service", self._legacy_ocr)
+        if ocr_service is None:
+            raise PluginServiceError("请先启用 PPT OCR 插件并在设置中选择识别引擎")
+        warnings: list[str] = []
+        if not ocr_service.can_ocr(warnings):
+            raise ExtractionError("OCR 引擎不可用：" + ("；".join(warnings) or "请检查相关依赖"))
+
+        work_dir = self._lesson_dir(self.config.downloads_dir, detail, lesson)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        ppt_path, _ = self._download_export(course_id, lesson_id, "ppt", work_dir)
+        statistics = {"cache_hits": 0, "inferences": 0}
+        statistics_lock = threading.Lock()
+
+        def recognize(data: bytes, name: str) -> str:
+            return ocr_service.ocr_image(
+                data, name, stats=statistics, stats_lock=statistics_lock, force=True,
+            )
+
+        def report(done: int, total: int, name: str) -> None:
+            percent = 15 + int((done / max(1, total)) * 75)
+            _report(progress, percent, f"重新识别 PPT 图片 {done}/{total}：{name}")
+
+        cancel = getattr(progress, "raise_if_cancelled", None)
+        body, failures = extract_pptx_text(
+            ppt_path,
+            recognize,
+            self.config.ocr_max_images,
+            progress=report,
+            ocr_workers=self.config.ocr_workers,
+            cancel_check=cancel if callable(cancel) else None,
+            event_log=lambda message, level="info": _task_log(progress, message, level),
+        )
+        if any("OCR 失败" in message for message in failures):
+            # Do not silently replace the last good OCR document with a
+            # partial or empty result when a model/engine is broken.
+            raise ExtractionError("重新 OCR 有图片识别失败，已保留旧结果：" + "；".join(failures[:3]))
+        for message in failures:
+            _task_log(progress, message, "warning")
+        _task_log(
+            progress,
+            f"重新 OCR：缓存命中 {statistics['cache_hits']} 张，实际推理 {statistics['inferences']} 张",
+            "info",
+        )
+        output_dir = self._lesson_dir(self.config.outputs_dir, detail, lesson)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / "ppt_ocr.md"
+        _atomic_text(output_path, _section("课件 OCR", body))
+        self._rebuild_combined_after_regeneration(output_dir, detail, lesson, progress)
+        _report(progress, 100, "PPT 重新 OCR 完成，合并文本已更新")
+        return output_path
+
+    def _rebuild_combined_after_regeneration(
+        self,
+        output_dir: Path,
+        detail: CourseDetailLike,
+        lesson: LessonLike,
+        progress: ProgressCallback | None,
+    ) -> None:
+        """Update combined output and invalidate summaries after fresh source text."""
+        transcript = output_dir / "transcript.md"
+        ppt_text = output_dir / "ppt_ocr.md"
+        sections = [
+            f"# {detail.course.title} - {lesson.title}",
+        ]
+        for path in (transcript, ppt_text):
+            if path.exists():
+                sections.append(path.read_text(encoding="utf-8"))
+        _report(progress, 94, "正在更新合并文本")
+        _atomic_text(output_dir / "combined.md", "\n\n".join(sections))
+        (output_dir / "summary.md").unlink(missing_ok=True)
+        _task_log(progress, "源文本已更新，旧 AI 总结失效，可手动重新生成。", "info")
 
     def summarize_lesson(
         self,
@@ -923,6 +1033,23 @@ def _safe_path(value: str) -> str:
 
 def _is_image_name(name: str) -> bool:
     return Path(name).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+
+
+def _atomic_text(path: Path, text: str) -> None:
+    """Do not truncate an existing result before the replacement is ready."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=f".{path.name}-", suffix=".tmp", delete=False,
+        ) as output:
+            temporary = Path(output.name)
+            output.write(text)
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _section(title: str, body: str) -> str:
