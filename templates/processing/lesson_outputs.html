@@ -24,8 +24,8 @@
   {% endif %}
   {% set ocr_state = ocr_status.get("state", "unknown") %}
   {% if ocr_status and ocr_state != "completed" %}
-    <div class="notice {{ 'error' if ocr_state == 'failed' else 'warning' if ocr_state in ['skipped', 'partial', 'empty'] else 'info' }}" data-ocr-result-status role="status">
-      <svg class="icon"><use href="/static/icons.svg#{{ 'circle-alert' if ocr_state in ['failed', 'skipped', 'partial'] else 'info' }}"></use></svg>
+    <div class="notice {{ 'error' if ocr_state == 'failed' else 'warning' if ocr_state in ['skipped', 'partial', 'empty'] else '' }}" data-ocr-result-status role="status">
+      <svg class="icon"><use href="/static/icons.svg#{{ 'circle-alert' if ocr_state in ['failed', 'skipped', 'partial'] else 'file-text' }}"></use></svg>
       <span>{{ ocr_status.get("message", "OCR 执行状态暂不可用。") }}{% if ocr_state in ['skipped', 'failed', 'partial', 'empty'] %} 可检查 <a href="/plugins">插件管理</a>和<a href="/settings">OCR 设置</a>，然后重新执行。{% endif %}</span>
     </div>
   {% endif %}
