@@ -40,6 +40,6 @@ FuckClassroom 的独立课次处理插件，插件 ID 为 `processing`。
 ## 开发与发布
 
 - `dev`：批量模式开发与回归测试分支，每次提交只跑 **Test plugin**，不会生成 Alpha。
-- **手动 Alpha**：在 [Actions → Release plugin](https://github.com/Yiyue345/fuckclassroom-plugin-processing/actions/workflows/release.yml) 选择运行分支 `dev`，填写例如 `0.1.0-alpha.1`，再点击 **Run workflow**。工作流先跑 Python 测试、Jinja 模板及 JavaScript 语法检查，通过后才构建 Registry ZIP、校验 SHA-256 并发布预发布版。重复版本号会被拒绝。
+- **手动 Alpha**：在 [Actions → Release plugin](https://github.com/Yiyue345/fuckclassroom-plugin-processing/actions/workflows/release.yml) 选择运行分支 `dev`，填写 `0.1.1-alpha.1`（版本前三段必须与 `dev/plugin.json` 一致），再点击 **Run workflow**。工作流先跑 Python 测试、Jinja 模板及 JavaScript 语法检查，通过后才构建 Registry ZIP、校验 SHA-256 并发布预发布版。重复版本号会被拒绝。
 - `main`：保留原有通过 CI 后自动构建 Beta 的流程。不会自动将 `dev` 合并到 `main`。
 
