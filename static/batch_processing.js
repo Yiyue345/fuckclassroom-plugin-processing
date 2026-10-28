@@ -73,7 +73,13 @@
     checkbox.type = 'checkbox';
     checkbox.setAttribute('aria-label', '选择' + (row.dataset.lessonTitle || row.dataset.lessonId));
     wrap.append(checkbox, el('span', '', '选'));
-    row.insertBefore(wrap, row.firstChild);
+    // Reuse the existing 1st grid cell; adding another grid item would
+    // shift every resource/status/action column and break the host layout.
+    const number = row.querySelector('.lesson-number');
+    if (!number) continue;
+    number.dataset.processingBatchNumber = number.textContent.trim();
+    number.textContent = '';
+    number.append(wrap);
     for (const event of ['click', 'pointerdown', 'keydown']) {
       wrap.addEventListener(event, e => e.stopPropagation(), { signal });
     }
@@ -82,7 +88,7 @@
       else selected.delete(row.dataset.lessonId);
       update();
     }, { signal });
-    checkboxes.set(row.dataset.lessonId, { checkbox, wrap });
+    checkboxes.set(row.dataset.lessonId, { checkbox, wrap, number });
   }
 
   function update() {
@@ -99,7 +105,10 @@
     enabled = true;
     toggle.setAttribute('aria-expanded', 'true');
     toggle.textContent = '退出批量选择';
-    for (const { wrap } of checkboxes.values()) wrap.classList.remove('hidden');
+    for (const { wrap, number } of checkboxes.values()) {
+      wrap.classList.remove('hidden');
+      number.classList.add('processing-batch-number-active');
+    }
   }
   toggle.addEventListener('click', () => {
     if (activeTask) { showTask(); return; }
@@ -107,7 +116,10 @@
     panel.classList.toggle('hidden', !enabled);
     toggle.setAttribute('aria-expanded', String(enabled));
     toggle.textContent = enabled ? '退出批量选择' : '批量选择';
-    for (const { wrap } of checkboxes.values()) wrap.classList.toggle('hidden', !enabled);
+    for (const { wrap, number } of checkboxes.values()) {
+      wrap.classList.toggle('hidden', !enabled);
+      number.classList.toggle('processing-batch-number-active', enabled);
+    }
   }, { signal });
 
   selectAll.addEventListener('click', () => {
