@@ -67,3 +67,14 @@ jobs:
         run: |
           python scripts/build_registry_artifact.py 0.1.0-ci.0
           sha256sum -c processing-0.1.0-ci.0.zip.sha256
+          python - <<'PY'
+          import zipfile
+          with zipfile.ZipFile('processing-0.1.0-ci.0.zip') as archive:
+              required = {
+                  'batch.py',
+                  'static/batch_processing.js',
+                  'static/batch_processing.css',
+              }
+              assert required.issubset(archive.namelist()), required - set(archive.namelist())
+              print('Batch processing installation assets are present')
+          PY
