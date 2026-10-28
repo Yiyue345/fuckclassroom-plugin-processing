@@ -16,7 +16,7 @@ SEMVER_RE = re.compile(
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 ROOT_FILES = (
-    "__init__.py", "plugin.json", "plugin.py", "extraction.py", "routes.py",
+    "__init__.py", "plugin.json", "plugin.py", "batch.py", "extraction.py", "routes.py",
     "services.py", "requirements.txt", "README.md",
 )
 TREE_DIRS = ("templates", "static")
