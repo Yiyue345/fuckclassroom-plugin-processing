@@ -65,11 +65,14 @@ jobs:
       - name: Smoke-build Registry v1 artifact
         shell: bash
         run: |
-          python scripts/build_registry_artifact.py 0.1.0-ci.0
-          sha256sum -c processing-0.1.0-ci.0.zip.sha256
-          python - <<'PY'
+          BASE_VERSION="$(python -c 'import json; from pathlib import Path; print(json.loads(Path("plugin.json").read_text(encoding="utf-8"))["version"].split("-")[0])')"
+          VERSION="${BASE_VERSION}-ci.0"
+          python scripts/build_registry_artifact.py "$VERSION"
+          sha256sum -c "processing-${VERSION}.zip.sha256"
+          VERSION="$VERSION" python - <<'PY'
+          import os
           import zipfile
-          with zipfile.ZipFile('processing-0.1.0-ci.0.zip') as archive:
+          with zipfile.ZipFile(f'processing-{os.environ["VERSION"]}.zip') as archive:
               required = {
                   'batch.py',
                   'static/batch_processing.js',
