@@ -13,18 +13,43 @@ permissions:
 
 jobs:
   release:
+    if: github.ref_name == 'dev'
     runs-on: ubuntu-latest
+    concurrency:
+      group: processing-manual-alpha
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+      - name: Verify selected dev commit
+        shell: bash
+        run: |
+          test "${GITHUB_REF_NAME}" = "dev" || { echo "Alpha must run on dev" >&2; exit 1; }
+      - name: Install validation tools
+        run: python -m pip install packaging jinja2
+      - name: Run complete regression tests before packaging
+        run: |
+          python -m compileall -q __init__.py plugin.py batch.py extraction.py routes.py services.py scripts tests
+          python -m unittest discover -s tests -p 'test_*.py' -v
+          node --check static/batch_processing.js
+          python - <<'PY'
+          from pathlib import Path
+          from jinja2 import Environment
+          for template in Path('templates').rglob('*.html'):
+              Environment().parse(template.read_text(encoding='utf-8'))
+          PY
       - name: Resolve version
         id: version
         shell: bash
         run: |
           VERSION="${{ inputs.version }}"
           if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then exit 1; fi
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]; then
+            echo "dev 仅允许手动发布 Alpha，例如 0.1.0-alpha.1" >&2
+            exit 1
+          fi
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "tag=v${VERSION}" >> "${GITHUB_OUTPUT}"
-          [[ "${VERSION}" == *-* ]] && echo "prerelease=true" >> "${GITHUB_OUTPUT}" || echo "prerelease=false" >> "${GITHUB_OUTPUT}"
+          echo "prerelease=true" >> "${GITHUB_OUTPUT}"
       - name: Build Registry artifact
         id: package
         shell: bash
@@ -40,6 +65,10 @@ jobs:
         shell: bash
         run: |
           TAG="${{ steps.version.outputs.tag }}"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "版本 ${TAG} 已发布，请选新的 Alpha 版本号" >&2
+            exit 1
+          fi
           ASSET="${{ steps.package.outputs.asset }}"
           git tag "${TAG}" "${GITHUB_SHA}"
           git push origin "${TAG}"
