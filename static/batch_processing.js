@@ -88,17 +88,22 @@
       else selected.delete(row.dataset.lessonId);
       update();
     }, { signal });
-    checkboxes.set(row.dataset.lessonId, { checkbox, wrap, number });
+    checkboxes.set(row.dataset.lessonId, { checkbox, wrap, number, row });
   }
 
   function update() {
-    counter.textContent = '已选择 ' + selected.size + ' / ' + Math.min(eligible.length, 30) + ' 个课次';
+    const usableCount = eligible.filter(row => mode.value !== 'retranscribe' || row.dataset.videoUrl).length;
+    counter.textContent = '已选择 ' + selected.size + ' / ' + Math.min(usableCount, 30) + ' 个课次';
     submit.disabled = Boolean(activeTask) || !selected.size || selected.size > 30;
     submit.textContent = activeTask ? '批量任务运行中' : '开始批量处理';
     mode.disabled = Boolean(activeTask);
     selectAll.disabled = Boolean(activeTask);
     clear.disabled = Boolean(activeTask);
-    for (const { checkbox } of checkboxes.values()) checkbox.disabled = Boolean(activeTask);
+    for (const { checkbox, wrap, row } of checkboxes.values()) {
+      const missingVideo = mode.value === 'retranscribe' && !row.dataset.videoUrl;
+      checkbox.disabled = Boolean(activeTask) || missingVideo;
+      wrap.title = missingVideo ? '本课次没有可用的课堂录像，无法重新转写' : '将此课次加入批量处理';
+    }
   }
   function showTask() {
     panel.classList.remove('hidden');
@@ -123,10 +128,26 @@
   }, { signal });
 
   selectAll.addEventListener('click', () => {
-    selected = new Set(eligible.slice(0, 30).map(row => row.dataset.lessonId));
+    selected = new Set(eligible
+      .filter(row => mode.value !== 'retranscribe' || row.dataset.videoUrl)
+      .slice(0, 30)
+      .map(row => row.dataset.lessonId));
     for (const [id, { checkbox }] of checkboxes) checkbox.checked = selected.has(id);
     update();
   }, { signal });
+  mode.addEventListener('change', () => {
+    if (mode.value === 'retranscribe') {
+      for (const row of eligible) {
+        if (!row.dataset.videoUrl) {
+          selected.delete(row.dataset.lessonId);
+          const entry = checkboxes.get(row.dataset.lessonId);
+          if (entry) entry.checkbox.checked = false;
+        }
+      }
+    }
+    update();
+  }, { signal });
+
   clear.addEventListener('click', () => {
     selected.clear();
     for (const { checkbox } of checkboxes.values()) checkbox.checked = false;
