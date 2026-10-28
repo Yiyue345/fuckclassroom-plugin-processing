@@ -2,7 +2,7 @@ name: Test plugin
 
 on:
   push:
-    branches: ["main", "plugin-management"]
+    branches: ["main", "dev", "plugin-management"]
   pull_request:
   workflow_dispatch:
 
@@ -39,7 +39,7 @@ jobs:
           }]
           assert SpecifierSet(data["app_requires"]).contains(Version("0.2.0.dev0"), prereleases=True)
       - name: Check Python syntax
-        run: python -m compileall -q __init__.py plugin.py extraction.py routes.py services.py scripts/build_registry_artifact.py tests
+        run: python -m compileall -q __init__.py plugin.py extraction.py batch.py routes.py services.py scripts/build_registry_artifact.py tests
       - name: Reject host package relative imports and sibling plugin imports
         shell: bash
         run: |
@@ -58,7 +58,10 @@ jobs:
           from pathlib import Path
           from jinja2 import Environment
           Environment().parse(Path('templates/processing/lesson_outputs.html').read_text(encoding='utf-8'))
+          Environment().parse(Path('templates/processing/lesson_actions.html').read_text(encoding='utf-8'))
           PY
+      - name: Check batch selector JavaScript
+        run: node --check static/batch_processing.js
       - name: Smoke-build Registry v1 artifact
         shell: bash
         run: |
