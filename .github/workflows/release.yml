@@ -24,6 +24,24 @@ jobs:
         shell: bash
         run: |
           test "${GITHUB_REF_NAME}" = "dev" || { echo "Alpha must run on dev" >&2; exit 1; }
+      - name: Validate requested Alpha version against plugin manifest
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          BASE_VERSION="$(python -c 'import json; from pathlib import Path; print(json.loads(Path("plugin.json").read_text(encoding="utf-8"))["version"].split("-")[0])')"
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]; then
+            echo "::error::dev 只允许 Alpha 版本，例如 ${BASE_VERSION}-alpha.1；实际填写 ${VERSION}" >&2
+            exit 1
+          fi
+          if [[ "${VERSION}" != "${BASE_VERSION}-alpha."* ]]; then
+            echo "::error::版本不匹配：plugin.json 是 ${BASE_VERSION}，应填写 ${BASE_VERSION}-alpha.N；实际填写 ${VERSION}" >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "prerelease=true" >> "${GITHUB_OUTPUT}"
       - name: Install validation tools
         run: python -m pip install packaging jinja2
       - name: Run complete regression tests before packaging
@@ -37,19 +55,6 @@ jobs:
           for template in Path('templates').rglob('*.html'):
               Environment().parse(template.read_text(encoding='utf-8'))
           PY
-      - name: Resolve version
-        id: version
-        shell: bash
-        run: |
-          VERSION="${{ inputs.version }}"
-          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then exit 1; fi
-          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]; then
-            echo "dev 仅允许手动发布 Alpha，例如 0.1.0-alpha.1" >&2
-            exit 1
-          fi
-          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "tag=v${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "prerelease=true" >> "${GITHUB_OUTPUT}"
       - name: Build Registry artifact
         id: package
         shell: bash
