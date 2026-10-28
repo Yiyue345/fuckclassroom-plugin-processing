@@ -9,6 +9,17 @@ FuckClassroom 的独立课次处理插件，插件 ID 为 `processing`。
 - 组合转写、OCR 和 AI 总结插件提供的服务
 - 课次输出页、处理进度与结果展示
 
+## 批量课次处理（dev）
+
+在「课程资源 → 课次列表」点击**批量选择**，勾选需要处理的课次，也可选择全选/清空。每批最多 30 个非直播课次，服务端会重新检查这些编号是否属于当前课程，拒绝重复或无效编号。
+
+- **提取文字（优先转写＋PPT）**：沿用单课次「提取文字」，优先使用本地语音转写，必要时尝试平台转写兜底，同时按当前 OCR 插件状态处理 PPT。会复用现有缓存，不强制重跑已有模型计算。
+- **重新语音转写（强制重跑）**：沿用单课次「重新语音转写」，用当前模型重新生成录播转写并更新合并文件；没有录播的课次不能选择这个模式。旧 AI 总结将按原处理逻辑失效。
+
+整个批次在 TaskManager 中表现为**一个后台任务**，课次依次执行，避免在默认模式下并发加载多个语音模型。任务中心记录每个课次的开始、结束及错误；处理进度包含总体百分比与当前课次的详细进度。处理期间可以从任务中心取消（模型内部可能需到下一次进度/取消检查时才停止）。
+
+个别课次失败不会阻止后续课次执行：成功的结果保留，最后将批次标记为失败并列出失败数量和原因，方便针对性重试。**同一时间只允许一个批量任务**，重复提交返回明确提示。前端刷新时会尝试恢复这个批次的任务编号与状态。
+
 ## OCR 跳过与错误诊断
 
 「提取文字」会先检查 PPT OCR 插件是否已启用、识别服务是否已注册以及 OCR 引擎是否可用。若不能启动 OCR，原生 PPT 文本仍然提取，但任务日志和结果页会明确标明跳过原因（例如插件未启用、RapidOCR 依赖缺失、Worker 初始化异常）。
@@ -26,6 +37,9 @@ FuckClassroom 的独立课次处理插件，插件 ID 为 `processing`。
 
 插件不会直接 import `transcription`、`ocr` 或 `ai_summary` 的源码；可选能力只通过 FuckClassroom 的 ServiceContainer 查找，并通过 `PluginServiceError` 处理跨插件失败。
 
-## 开发
+## 开发与发布
 
-开发分支为 `plugin-management`。合并到 `main` 后，CI 成功会自动发布 Registry v1 beta Release。
+- `dev`：批量模式开发与回归测试分支，每次提交只跑 **Test plugin**，不会生成 Alpha。
+- **手动 Alpha**：在 [Actions → Release plugin](https://github.com/Yiyue345/fuckclassroom-plugin-processing/actions/workflows/release.yml) 选择运行分支 `dev`，填写例如 `0.1.0-alpha.1`，再点击 **Run workflow**。工作流先跑 Python 测试、Jinja 模板及 JavaScript 语法检查，通过后才构建 Registry ZIP、校验 SHA-256 并发布预发布版。重复版本号会被拒绝。
+- `main`：保留原有通过 CI 后自动构建 Beta 的流程。不会自动将 `dev` 合并到 `main`。
+
