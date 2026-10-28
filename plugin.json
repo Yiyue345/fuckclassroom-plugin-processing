@@ -1,7 +1,7 @@
 {
   "id": "processing",
   "name": "课次处理",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "api_version": 1,
   "app_requires": ">=0.1,<0.3",
   "description": "FuckClassroom 课次文字处理编排与结果页面插件。",
